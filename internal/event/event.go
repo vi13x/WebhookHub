@@ -1,6 +1,7 @@
 package event
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -10,8 +11,10 @@ import (
 )
 
 var (
-	ErrNotFound = errors.New("event not found")
-	ErrInvalid  = errors.New("type and non-null JSON data are required")
+	ErrNotFound   = errors.New("event not found")
+	ErrInvalid    = errors.New("type and non-null JSON data are required")
+	ErrConflict   = errors.New("idempotency key already used with different event data")
+	ErrInvalidKey = errors.New("idempotency key must contain 1 to 200 visible ASCII characters")
 )
 
 type Event struct {
@@ -23,7 +26,7 @@ type Event struct {
 }
 
 type Store interface {
-	Save(Event)
+	Save(Event, string) (Event, bool, error)
 	List() []Event
 	Get(string) (Event, error)
 }
@@ -36,22 +39,39 @@ func NewService(store Store) *Service {
 	return &Service{store: store}
 }
 
-func (s *Service) Create(kind string, data json.RawMessage) (Event, error) {
+func (s *Service) Create(kind string, data json.RawMessage, key string) (Event, bool, error) {
+	if len(key) > 200 {
+		return Event{}, false, ErrInvalidKey
+	}
+	for _, ch := range key {
+		if ch < 33 || ch > 126 {
+			return Event{}, false, ErrInvalidKey
+		}
+	}
 	kind = strings.TrimSpace(kind)
 	if kind == "" || !json.Valid(data) || strings.TrimSpace(string(data)) == "null" {
-		return Event{}, ErrInvalid
+		return Event{}, false, ErrInvalid
+	}
+	var value any
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	if err := decoder.Decode(&value); err != nil {
+		return Event{}, false, ErrInvalid
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return Event{}, false, err
 	}
 	var id [16]byte
 	if _, err := rand.Read(id[:]); err != nil {
-		return Event{}, err
+		return Event{}, false, err
 	}
 	e := Event{
 		ID: hex.EncodeToString(id[:]), Type: kind,
 		Data:   append(json.RawMessage(nil), data...),
 		Status: "pending", CreatedAt: time.Now().UTC(),
 	}
-	s.store.Save(e)
-	return e, nil
+	return s.store.Save(e, key)
 }
 
 func (s *Service) List() []Event { return s.store.List() }

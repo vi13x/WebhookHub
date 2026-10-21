@@ -46,8 +46,17 @@ func (h eventHandler) create(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	e, err := h.events.Create(input.Type, input.Data)
-	if errors.Is(err, event.ErrInvalid) {
+	keys := r.Header.Values("Idempotency-Key")
+	if len(keys) > 1 || (len(keys) == 1 && keys[0] == "") {
+		writeError(w, http.StatusBadRequest, event.ErrInvalidKey.Error())
+		return
+	}
+	e, created, err := h.events.Create(input.Type, input.Data, r.Header.Get("Idempotency-Key"))
+	if errors.Is(err, event.ErrConflict) {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	if errors.Is(err, event.ErrInvalid) || errors.Is(err, event.ErrInvalidKey) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -56,6 +65,10 @@ func (h eventHandler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Location", "/events/"+e.ID)
+	if !created {
+		writeJSON(w, http.StatusOK, e)
+		return
+	}
 	writeJSON(w, http.StatusCreated, e)
 }
 

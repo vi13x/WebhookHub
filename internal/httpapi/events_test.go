@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"webhookhub/internal/event"
@@ -83,5 +85,80 @@ func TestInvalidEventsAreNotStored(t *testing.T) {
 				t.Fatalf("status=%d, body=%s, stored=%d", w.Code, w.Body.String(), len(store.List()))
 			}
 		})
+	}
+}
+
+func TestIdempotency(t *testing.T) {
+	store := memory.NewEventStore()
+	h := httpapi.NewHandler(event.NewService(store))
+	send := func(key, body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("POST", "/events", strings.NewReader(body))
+		r.Header.Set("Content-Type", "application/json")
+		if key != "" {
+			r.Header.Set("Idempotency-Key", key)
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w
+	}
+	body := `{"type":"order.created","data":{"order_id":42,"amount":1500}}`
+	first := send("order-42", body)
+	replay := send("order-42", `{"data":{"amount":1500, "order_id":42},"type":"order.created"}`)
+	if first.Code != 201 || replay.Code != 200 || first.Body.String() != replay.Body.String() {
+		t.Fatalf("first=%d %s replay=%d %s", first.Code, first.Body.String(), replay.Code, replay.Body.String())
+	}
+	for _, changed := range []string{
+		`{"type":"order.created","data":{"order_id":43,"amount":1500}}`,
+		`{"type":"order.updated","data":{"order_id":42,"amount":1500}}`,
+	} {
+		if w := send("order-42", changed); w.Code != 409 {
+			t.Fatalf("conflict: %d %s", w.Code, w.Body.String())
+		}
+	}
+	if len(store.List()) != 1 {
+		t.Fatal("duplicate stored")
+	}
+	if w := send("another-key", body); w.Code != 201 {
+		t.Fatal(w.Code)
+	}
+	for i := 0; i < 2; i++ {
+		if w := send("", body); w.Code != 201 {
+			t.Fatal(w.Code)
+		}
+	}
+	for _, key := range []string{" ", "two words", strings.Repeat("a", 201)} {
+		if w := send(key, body); w.Code != 400 {
+			t.Fatalf("invalid key: %d", w.Code)
+		}
+	}
+	if len(store.List()) != 4 {
+		t.Fatal("unexpected event count")
+	}
+}
+
+func TestConcurrentIdempotency(t *testing.T) {
+	store := memory.NewEventStore()
+	h := httpapi.NewHandler(event.NewService(store))
+	var wg sync.WaitGroup
+	var created atomic.Int32
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			r := httptest.NewRequest("POST", "/events", strings.NewReader(`{"type":"order.created","data":{"order_id":42}}`))
+			r.Header.Set("Content-Type", "application/json")
+			r.Header.Set("Idempotency-Key", "order-42")
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+			if w.Code == 201 {
+				created.Add(1)
+			} else if w.Code != 200 {
+				t.Errorf("unexpected status: %d", w.Code)
+			}
+		}()
+	}
+	wg.Wait()
+	if created.Load() != 1 || len(store.List()) != 1 {
+		t.Fatalf("created=%d stored=%d", created.Load(), len(store.List()))
 	}
 }

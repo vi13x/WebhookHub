@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"bytes"
 	"sync"
 
 	"webhookhub/internal/event"
@@ -10,19 +11,31 @@ type EventStore struct {
 	mu     sync.RWMutex
 	events map[string]event.Event
 	ids    []string
+	keys   map[string]string
 }
 
 func NewEventStore() *EventStore {
-	return &EventStore{events: make(map[string]event.Event)}
+	return &EventStore{events: make(map[string]event.Event), keys: make(map[string]string)}
 }
 
-func (s *EventStore) Save(e event.Event) {
+func (s *EventStore) Save(e event.Event, key string) (event.Event, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if key != "" {
+		if id, exists := s.keys[key]; exists {
+			existing := s.events[id]
+			if existing.Type != e.Type || !bytes.Equal(existing.Data, e.Data) {
+				return event.Event{}, false, event.ErrConflict
+			}
+			return clone(existing), false, nil
+		}
+		s.keys[key] = e.ID
+	}
 	if _, exists := s.events[e.ID]; !exists {
 		s.ids = append(s.ids, e.ID)
 	}
 	s.events[e.ID] = clone(e)
+	return clone(e), true, nil
 }
 
 func (s *EventStore) List() []event.Event {

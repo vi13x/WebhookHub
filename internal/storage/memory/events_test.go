@@ -13,7 +13,7 @@ import (
 func TestStoreOwnsData(t *testing.T) {
 	s := memory.NewEventStore()
 	e := event.Event{ID: "one", Data: json.RawMessage(`{"a":1}`)}
-	s.Save(e)
+	s.Save(e, "")
 	e.Data[0] = '!'
 	got, _ := s.Get("one")
 	got.Data[0] = '!'
@@ -32,7 +32,7 @@ func TestConcurrentAccess(t *testing.T) {
 		wg.Add(1)
 		go func(id string) {
 			defer wg.Done()
-			s.Save(event.Event{ID: id})
+			s.Save(event.Event{ID: id}, "")
 			if _, err := s.Get(id); err != nil {
 				t.Error(err)
 			}
