@@ -1,10 +1,18 @@
 package httpapi
 
-import "net/http"
+import (
+	"net/http"
 
-func NewHandler() http.Handler {
+	"webhookhub/internal/event"
+)
+
+func NewHandler(events *event.Service) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", health)
+	h := eventHandler{events: events}
+	mux.HandleFunc("POST /events", h.create)
+	mux.HandleFunc("GET /events", h.list)
+	mux.HandleFunc("GET /events/{id}", h.get)
 	return mux
 }
 

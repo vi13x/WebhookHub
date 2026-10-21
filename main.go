@@ -11,7 +11,9 @@ import (
 	"time"
 
 	"webhookhub/internal/config"
+	"webhookhub/internal/event"
 	"webhookhub/internal/httpapi"
+	"webhookhub/internal/storage/memory"
 )
 
 func main() {
@@ -24,9 +26,10 @@ func main() {
 
 func run(logger *slog.Logger) error {
 	cfg := config.Load()
+	events := event.NewService(memory.NewEventStore())
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           httpapi.NewHandler(),
+		Handler:           httpapi.NewHandler(events),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,
