@@ -1,10 +1,14 @@
 package event
 
+import "time"
+
 type ListOptions struct {
 	Type        string
 	Limit       int
 	Offset      int
 	NewestFirst bool
+	From        time.Time
+	To          time.Time
 }
 
 type Stats struct {
@@ -16,6 +20,9 @@ type Stats struct {
 func (s *Service) Query(options ListOptions) ([]Event, int) {
 	items := make([]Event, 0)
 	for _, e := range s.store.List() {
+		if (!options.From.IsZero() && e.CreatedAt.Before(options.From)) || (!options.To.IsZero() && e.CreatedAt.After(options.To)) {
+			continue
+		}
 		if options.Type == "" || e.Type == options.Type {
 			items = append(items, e)
 		}
