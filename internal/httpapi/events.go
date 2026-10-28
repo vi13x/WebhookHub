@@ -75,6 +75,11 @@ func (h eventHandler) create(w http.ResponseWriter, r *http.Request) {
 
 func (h eventHandler) list(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
+	from, to, err := timeBounds(query)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	limit, offset := 50, 0
 	for name, target := range map[string]*int{"limit": &limit, "offset": &offset} {
 		if query.Has(name) {
@@ -94,6 +99,7 @@ func (h eventHandler) list(w http.ResponseWriter, r *http.Request) {
 	}
 	items, total := h.events.Query(event.ListOptions{
 		Type: query.Get("type"), Limit: limit, Offset: offset, NewestFirst: order == "desc",
+		From: from, To: to,
 	})
 	w.Header().Set("X-Total-Count", strconv.Itoa(total))
 	writeJSON(w, http.StatusOK, items)
