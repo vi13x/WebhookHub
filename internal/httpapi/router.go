@@ -12,6 +12,7 @@ func NewHandler(events *event.Service) http.Handler {
 	h := eventHandler{events: events}
 	mux.HandleFunc("POST /events", h.create)
 	mux.HandleFunc("GET /events", h.list)
+	mux.HandleFunc("GET /events/stats", h.stats)
 	mux.HandleFunc("GET /events/{id}", h.get)
 	return mux
 }

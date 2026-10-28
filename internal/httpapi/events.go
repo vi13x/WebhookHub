@@ -6,6 +6,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"strconv"
 
 	"webhookhub/internal/event"
 )
@@ -73,7 +74,33 @@ func (h eventHandler) create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h eventHandler) list(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, h.events.List())
+	query := r.URL.Query()
+	limit, offset := 50, 0
+	for name, target := range map[string]*int{"limit": &limit, "offset": &offset} {
+		if query.Has(name) {
+			values := query[name]
+			value, err := strconv.Atoi(values[0])
+			if len(values) != 1 || err != nil || value < 0 || (name == "limit" && (value < 1 || value > 100)) {
+				writeError(w, http.StatusBadRequest, "limit must be 1..100 and offset must be a non-negative integer")
+				return
+			}
+			*target = value
+		}
+	}
+	order := query.Get("order")
+	if order != "" && order != "asc" && order != "desc" {
+		writeError(w, http.StatusBadRequest, "order must be asc or desc")
+		return
+	}
+	items, total := h.events.Query(event.ListOptions{
+		Type: query.Get("type"), Limit: limit, Offset: offset, NewestFirst: order == "desc",
+	})
+	w.Header().Set("X-Total-Count", strconv.Itoa(total))
+	writeJSON(w, http.StatusOK, items)
+}
+
+func (h eventHandler) stats(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, h.events.Stats())
 }
 
 func (h eventHandler) get(w http.ResponseWriter, r *http.Request) {
