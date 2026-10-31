@@ -11,6 +11,7 @@ func NewHandler(events *event.Service) http.Handler {
 	mux.HandleFunc("GET /health", health)
 	h := eventHandler{events: events}
 	mux.HandleFunc("POST /events", h.create)
+	mux.HandleFunc("POST /events/lookup", h.lookup)
 	mux.HandleFunc("GET /events", h.list)
 	mux.HandleFunc("GET /events/stats", h.stats)
 	mux.HandleFunc("GET /events/export", h.export)
